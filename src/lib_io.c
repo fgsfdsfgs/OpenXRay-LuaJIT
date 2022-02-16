@@ -97,7 +97,7 @@ static int io_file_close(lua_State *L, IOFileUD *iof)
     ok = (fclose(iof->fp) == 0);
   } else if ((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_PIPE) {
     int stat = -1;
-#if LJ_TARGET_POSIX
+#if LJ_TARGET_POSIX && !LJ_TARGET_SWITCH
     stat = pclose(iof->fp);
 #elif LJ_TARGET_WINDOWS && !LJ_TARGET_XBOXONE && !LJ_TARGET_UWP
     stat = _pclose(iof->fp);
@@ -412,7 +412,7 @@ LJLIB_CF(io_open)
 
 LJLIB_CF(io_popen)
 {
-#if LJ_TARGET_POSIX || (LJ_TARGET_WINDOWS && !LJ_TARGET_XBOXONE && !LJ_TARGET_UWP)
+#if (LJ_TARGET_POSIX && !LJ_TARGET_SWITCH) || (LJ_TARGET_WINDOWS && !LJ_TARGET_XBOXONE && !LJ_TARGET_UWP)
   const char *fname = strdata(lj_lib_checkstr(L, 1));
   GCstr *s = lj_lib_optstr(L, 2);
   const char *mode = s ? strdata(s) : "r";
@@ -433,7 +433,7 @@ LJLIB_CF(io_popen)
 LJLIB_CF(io_tmpfile)
 {
   IOFileUD *iof = io_file_new(L);
-#if LJ_TARGET_PS3 || LJ_TARGET_PS4 || LJ_TARGET_PSVITA
+#if LJ_TARGET_PS3 || LJ_TARGET_PS4 || LJ_TARGET_PSVITA || LJ_TARGET_SWITCH
   iof->fp = NULL; errno = ENOSYS;
 #else
   iof->fp = tmpfile();

@@ -102,6 +102,10 @@ typedef BOOLEAN (WINAPI *PRGR)(void *buf, ULONG len);
 static PRGR libfunc_rgr;
 #endif
 
+#elif LJ_TARGET_SWITCH
+
+extern void randomGet(void *buf, size_t len);
+
 #elif LJ_TARGET_POSIX
 
 #if LJ_TARGET_LINUX
@@ -169,6 +173,11 @@ int LJ_FASTCALL lj_prng_seed_secure(PRNGState *rs)
 
   if (sceRandomGetRandomNumber(rs->u, sizeof(rs->u) == 0)
     goto ok;
+
+#elif LJ_TARGET_SWITCH
+
+  randomGet(rs->u, sizeof(rs->u));
+  goto ok;
 
 #elif LJ_TARGET_UWP || LJ_TARGET_XBOXONE
 

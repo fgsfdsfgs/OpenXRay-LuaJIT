@@ -90,6 +90,8 @@
 #define LUAJIT_OS	LUAJIT_OS_POSIX
 #elif defined(__HAIKU__)
 #define LUAJIT_OS	LUAJIT_OS_POSIX
+#elif defined(__SWITCH__)
+#define LUAJIT_OS	LUAJIT_OS_POSIX
 #elif defined(__CYGWIN__)
 #define LJ_TARGET_CYGWIN	1
 #define LUAJIT_OS	LUAJIT_OS_POSIX
@@ -153,6 +155,11 @@
 #define LJ_TARGET_XBOXONE	1
 #define LJ_TARGET_CONSOLE	1
 #define LJ_TARGET_GC64		1
+#endif
+
+#ifdef __SWITCH__
+#define LJ_TARGET_SWITCH	1
+#define LJ_TARGET_CONSOLE	1
 #endif
 
 #ifdef _UWP
@@ -515,7 +522,7 @@
 #define LJ_DUALNUM		0
 #endif
 
-#if LJ_TARGET_IOS || LJ_TARGET_CONSOLE
+#if LJ_TARGET_IOS || (LJ_TARGET_CONSOLE && !LJ_TARGET_SWITCH)
 /* Runtime code generation is restricted on iOS. Complain to Apple, not me. */
 /* Ditto for the consoles. Complain to Sony or MS, not me. */
 #ifndef LUAJIT_ENABLE_JIT
@@ -553,7 +560,7 @@
 
 #if defined(LUAJIT_DISABLE_PROFILE)
 #define LJ_HASPROFILE		0
-#elif LJ_TARGET_POSIX
+#elif LJ_TARGET_POSIX && !LJ_TARGET_SWITCH
 #define LJ_HASPROFILE		1
 #define LJ_PROFILE_SIGPROF	1
 #elif LJ_TARGET_PS3
@@ -604,7 +611,7 @@
 #endif
 
 /* Various workarounds for embedded operating systems or weak C runtimes. */
-#if defined(__ANDROID__) || defined(__symbian__) || LJ_TARGET_XBOX360 || LJ_TARGET_WINDOWS
+#if defined(__ANDROID__) || defined(__symbian__) || LJ_TARGET_XBOX360 || LJ_TARGET_WINDOWS || LJ_TARGET_SWITCH
 #define LUAJIT_NO_LOG2
 #endif
 #if LJ_TARGET_CONSOLE || (LJ_TARGET_IOS && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_8_0)

@@ -86,7 +86,7 @@ static int mcode_setprot(void *p, size_t sz, DWORD prot)
   return !LJ_WIN_VPROTECT(p, sz, prot, &oprot);
 }
 
-#elif LJ_TARGET_POSIX
+#elif LJ_TARGET_POSIX && !LJ_TARGET_SWITCH
 
 #include <sys/mman.h>
 
@@ -119,9 +119,142 @@ static int mcode_setprot(void *p, size_t sz, int prot)
   return mprotect(p, sz, prot);
 }
 
+#elif LJ_TARGET_SWITCH
+
+#include <switch/kernel/svc.h>
+#include <switch/kernel/virtmem.h>
+#include <switch/runtime/env.h>
+#include <malloc.h>
+
+/* Larger than sizeof(void *) for better alignment */
+#define LJ_MCBOTTOM_OFFSET 16
+
+#define MCPROT_RW	(Perm_Rw)
+#define MCPROT_RX	(Perm_Rx)
+
+static inline void *get_orig_addr(void *ptr)
+{
+  return (char *)ptr + sizeof(MCLink);
+}
+
+static inline void *get_orig(void *ptr)
+{
+  return *(void **)get_orig_addr(ptr);
+}
+
+/* These are used elsewhere for virtual memory allocation and mapping */
+
+void *lj_switch_valloc(void *hint, size_t sz, unsigned long long prot)
+{
+  sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
+  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
+
+  void *p = memalign(LJ_PAGESIZE, sz);
+  *(void **)get_orig_addr(p) = p;
+
+  virtmemLock();
+
+  if (!hint) {
+    hint = virtmemFindCodeMemory(sz, LJ_PAGESIZE);
+  } else {
+    MemoryInfo info = { 0 };
+    u32 pageInfo = 0;
+    svcQueryMemory(&info, &pageInfo, (u64)hint);
+    if (info.type != MemType_Unmapped)
+      goto _err;
+  }
+
+  Handle self = envGetOwnProcessHandle();
+
+  Result res = svcMapProcessCodeMemory(self, hint, (u64)p, sz);
+  if (R_FAILED(res)) {
+    free(p);
+    goto _err;
+  }
+
+  res = svcSetProcessMemoryPermission(self, hint, sz, prot);
+  if (R_FAILED(res)) {
+    svcUnmapProcessCodeMemory(self, hint, (u64)p, sz);
+    free(p);
+    goto _err;
+  }
+
+  virtmemUnlock();
+  return (void *)hint;
+
+_err:
+  virtmemUnlock();
+  return NULL;
+}
+
+void *lj_switch_vfree(void *p, size_t sz)
+{
+  sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
+  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
+
+  void *orig_p = get_orig(p);
+  svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)p, (u64)orig_p, sz);
+  free(orig_p);
+}
+
+int lj_switch_vsetprot(void *p, size_t sz, unsigned long long prot)
+{
+  sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
+  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
+
+  void *orig_p = get_orig(p);
+  Result res = 0;
+  Handle self = envGetOwnProcessHandle();
+
+  /* Switch lets us change from RW -> RX but not RX -> RW, unmap and map again */
+  if (prot == Perm_Rw) {
+    virtmemLock();
+
+    res = svcUnmapProcessCodeMemory(self, (u64)p, (u64)orig_p, sz);
+    if (R_FAILED(res)) goto _err;
+
+    res = svcMapProcessCodeMemory(self, (u64)p, (u64)orig_p, sz);
+    if (R_FAILED(res)) goto _err;
+
+    virtmemUnlock();
+  }
+
+  res = svcSetProcessMemoryPermission(self, (u64)p, sz, prot);
+  if (R_FAILED(res)) return 1;
+
+  return 0;
+
+_err:
+  virtmemUnlock();
+  return 1;
+}
+
+static void *mcode_alloc_at(jit_State *J, uintptr_t hint, size_t sz, int prot)
+{
+  void *p = lj_switch_valloc((void *)hint, sz, (u64)prot);
+  if (!p) lj_trace_err(J, LJ_TRERR_MCODEAL);
+  return NULL;
+}
+
+static void mcode_free(jit_State *J, void *p, size_t sz)
+{
+  lj_switch_vfree(p, sz);
+}
+
+static int mcode_setprot(void *p, size_t sz, int prot)
+{
+  return lj_switch_vsetprot(p, sz, (u64)prot);
+}
+
 #else
 
 #error "Missing OS support for explicit placement of executable memory"
+
+#endif
+
+#ifndef LJ_MCBOTTOM_OFFSET
+
+#define LJ_MCBOTTOM_OFFSET 0
 
 #endif
 
@@ -265,7 +398,7 @@ static void mcode_allocarea(jit_State *J)
   J->szmcarea = sz;
   J->mcprot = MCPROT_GEN;
   J->mctop = (MCode *)((char *)J->mcarea + J->szmcarea);
-  J->mcbot = (MCode *)((char *)J->mcarea + sizeof(MCLink));
+  J->mcbot = (MCode *)((char *)J->mcarea + sizeof(MCLink) + LJ_MCBOTTOM_OFFSET);
   ((MCLink *)J->mcarea)->next = oldarea;
   ((MCLink *)J->mcarea)->size = sz;
   J->szallmcarea += sz;

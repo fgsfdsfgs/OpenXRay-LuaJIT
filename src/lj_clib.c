@@ -22,7 +22,12 @@
 
 #if LJ_TARGET_DLOPEN
 
+#if LJ_TARGET_SWITCH
+#define SOLDER_LIBDL_COMPAT
+#include <solder.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <stdio.h>
 
 #if defined(RTLD_DEFAULT)

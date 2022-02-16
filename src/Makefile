@@ -553,6 +553,21 @@ endif
 ifeq (PS3,$(TARGET_SYS))
   BUILDMODE= static
 endif
+ifeq (Switch,$(TARGET_SYS))
+  ifeq ($(strip $(DEVKITPRO)),)
+    $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/devkitpro")
+  endif
+  TARGET_FLAGS:= -march=armv8-a -mtp=soft -fPIE -fPIC -specs=$(DEVKITPRO)/libnx/switch.specs
+  TARGET_FLAGS+= --sysroot $(DEVKITPRO)/devkitA64/aarch64-none-elf -I$(DEVKITPRO)/libnx/include/ -I$(DEVKITPRO)/portlibs/switch/include
+  TARGET_FLAGS+= -DLUAJIT_USE_SYSMALLOC -D__SWITCH__
+  TARGET_TLIBS+= -L$(DEVKITPRO)/portlibs/switch/lib -lsolder -L$(DEVKITPRO)/libnx/lib -lnx
+  ifneq (static,$(BUILDMODE))
+    BUILDMODE= dynamic
+    TARGET_SHLDFLAGS+= -rdynamic -nostartfiles -nostdlib
+    TARGET_TLIBS+= -rdynamic
+    TARGET_ALIBS+= -lgcc
+  endif
+endif
 
 ifeq (Windows,$(HOST_SYS))
   MINILUA_T= host/minilua.exe
@@ -713,7 +728,7 @@ $(LUAJIT_SO): $(LJVMCORE_O)
 
 $(LUAJIT_T): $(TARGET_O) $(LUAJIT_O) $(TARGET_DEP)
 	$(E) "LINK      $@"
-	$(Q)$(TARGET_LD) $(TARGET_ALDFLAGS) -o $@ $(LUAJIT_O) $(TARGET_O) $(TARGET_ALIBS)
+	$(Q)$(TARGET_LD) $(TARGET_ALDFLAGS) -o $@ $(LUAJIT_O) $(TARGET_O) $(TARGET_ALIBS) $(TARGET_TLIBS)
 	$(Q)$(TARGET_STRIP) $@
 	$(E) "OK        Successfully built LuaJIT"
 

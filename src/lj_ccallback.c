@@ -250,6 +250,15 @@ static void *callback_mcode_init(global_State *g, uint32_t *page)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#elif LJ_TARGET_SWITCH
+
+#include <switch/kernel/svc.h>
+
+/* defined in lj_mcode.c */
+extern void *lj_switch_valloc(void *hint, size_t sz, unsigned long long prot);
+extern int lj_switch_vsetprot(void *p, size_t sz, unsigned long long prot);
+extern void *lj_switch_vfree(void *p, size_t sz);
+
 #elif LJ_TARGET_POSIX
 
 #include <sys/mman.h>
@@ -257,6 +266,10 @@ static void *callback_mcode_init(global_State *g, uint32_t *page)
 #define MAP_ANONYMOUS   MAP_ANON
 #endif
 
+#endif
+
+#ifndef LJ_MCBOTTOM_OFFSET
+#define LJ_MCBOTTOM_OFFSET 0
 #endif
 
 /* Allocate and initialize area for callback function pointers. */
@@ -268,6 +281,10 @@ static void callback_mcode_new(CTState *cts)
     lj_err_caller(cts->L, LJ_ERR_FFI_CBACKOV);
 #if LJ_TARGET_WINDOWS
   p = LJ_WIN_VALLOC(NULL, sz, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+  if (!p)
+    lj_err_caller(cts->L, LJ_ERR_FFI_CBACKOV);
+#elif LJ_TARGET_SWITCH
+  p = lj_switch_valloc(NULL, sz, Perm_Rw);
   if (!p)
     lj_err_caller(cts->L, LJ_ERR_FFI_CBACKOV);
 #elif LJ_TARGET_POSIX
@@ -290,6 +307,8 @@ static void callback_mcode_new(CTState *cts)
     DWORD oprot;
     LJ_WIN_VPROTECT(p, sz, PAGE_EXECUTE_READ, &oprot);
   }
+#elif LJ_TARGET_SWITCH
+  lj_switch_vsetprot(p, sz, Perm_Rx);
 #elif LJ_TARGET_POSIX
   mprotect(p, sz, (PROT_READ|PROT_EXEC));
 #endif
@@ -304,6 +323,8 @@ void lj_ccallback_mcode_free(CTState *cts)
 #if LJ_TARGET_WINDOWS
   VirtualFree(p, 0, MEM_RELEASE);
   UNUSED(sz);
+#elif LJ_TARGET_SWITCH
+  lj_switch_vfree(p, sz);
 #elif LJ_TARGET_POSIX
   munmap(p, sz);
 #else

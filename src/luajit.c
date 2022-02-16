@@ -490,7 +490,7 @@ static int runargs(lua_State *L, char **argv, int argn)
 
 static int handle_luainit(lua_State *L)
 {
-#if LJ_TARGET_CONSOLE
+#if LJ_TARGET_CONSOLE && !LJ_TARGET_SWITCH
   const char *init = NULL;
 #else
   const char *init = getenv(LUA_INIT);
