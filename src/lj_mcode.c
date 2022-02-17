@@ -125,6 +125,7 @@ static int mcode_setprot(void *p, size_t sz, int prot)
 #include <switch/kernel/virtmem.h>
 #include <switch/runtime/env.h>
 #include <malloc.h>
+#include <stdio.h>
 
 /* Larger than sizeof(void *) for better alignment */
 #define LJ_MCBOTTOM_OFFSET 16
@@ -146,11 +147,17 @@ static inline void *get_orig(void *ptr)
 
 void *lj_switch_valloc(void *hint, size_t sz, unsigned long long prot)
 {
+  void *p = NULL;
+
   sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
   sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
 
-  void *p = memalign(LJ_PAGESIZE, sz);
+  p = memalign(LJ_PAGESIZE, sz);
+  if (!p) return NULL;
+
   *(void **)get_orig_addr(p) = p;
+
+  Handle self = envGetOwnProcessHandle();
 
   virtmemLock();
 
@@ -160,34 +167,30 @@ void *lj_switch_valloc(void *hint, size_t sz, unsigned long long prot)
     MemoryInfo info = { 0 };
     u32 pageInfo = 0;
     svcQueryMemory(&info, &pageInfo, (u64)hint);
-    if (info.type != MemType_Unmapped)
+    if (info.type != MemType_Unmapped || info.size < sz)
       goto _err;
   }
 
-  Handle self = envGetOwnProcessHandle();
-
-  Result res = svcMapProcessCodeMemory(self, hint, (u64)p, sz);
-  if (R_FAILED(res)) {
-    free(p);
-    goto _err;
-  }
-
-  res = svcSetProcessMemoryPermission(self, hint, sz, prot);
-  if (R_FAILED(res)) {
-    svcUnmapProcessCodeMemory(self, hint, (u64)p, sz);
-    free(p);
-    goto _err;
-  }
+  Result res = svcMapProcessCodeMemory(self, (u64)hint, (u64)p, sz);
+  if (R_FAILED(res)) goto _err;
 
   virtmemUnlock();
+
+  res = svcSetProcessMemoryPermission(self, (u64)hint, sz, prot);
+  if (R_FAILED(res)) {
+    svcUnmapProcessCodeMemory(self, (u64)hint, (u64)p, sz);
+    goto _err;
+  }
+
   return (void *)hint;
 
 _err:
   virtmemUnlock();
+  free(p);
   return NULL;
 }
 
-void *lj_switch_vfree(void *p, size_t sz)
+void lj_switch_vfree(void *p, size_t sz)
 {
   sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
   sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
@@ -207,7 +210,7 @@ int lj_switch_vsetprot(void *p, size_t sz, unsigned long long prot)
   Handle self = envGetOwnProcessHandle();
 
   /* Switch lets us change from RW -> RX but not RX -> RW, unmap and map again */
-  if (prot == Perm_Rw) {
+  if (prot == Perm_Rx) {
     virtmemLock();
 
     res = svcUnmapProcessCodeMemory(self, (u64)p, (u64)orig_p, sz);
@@ -233,7 +236,7 @@ static void *mcode_alloc_at(jit_State *J, uintptr_t hint, size_t sz, int prot)
 {
   void *p = lj_switch_valloc((void *)hint, sz, (u64)prot);
   if (!p) lj_trace_err(J, LJ_TRERR_MCODEAL);
-  return NULL;
+  return p;
 }
 
 static void mcode_free(jit_State *J, void *p, size_t sz)
