@@ -127,8 +127,8 @@ static int mcode_setprot(void *p, size_t sz, int prot)
 #include <malloc.h>
 #include <stdio.h>
 
-/* Larger than sizeof(void *) for better alignment */
-#define LJ_MCBOTTOM_OFFSET 16
+/* Space for orig_p */
+#define LJ_MCBOTTOM_OFFSET sizeof(void *)
 
 #define MCPROT_RW	(Perm_Rw)
 #define MCPROT_RX	(Perm_Rx)
@@ -147,12 +147,7 @@ static inline void *get_orig(void *ptr)
 
 void *lj_switch_valloc(void *hint, size_t sz, unsigned long long prot)
 {
-  void *p = NULL;
-
-  sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
-  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
-
-  p = memalign(LJ_PAGESIZE, sz);
+  void *p = memalign(LJ_PAGESIZE, sz);
   if (!p) return NULL;
 
   *(void **)get_orig_addr(p) = p;
@@ -167,7 +162,8 @@ void *lj_switch_valloc(void *hint, size_t sz, unsigned long long prot)
     MemoryInfo info = { 0 };
     u32 pageInfo = 0;
     svcQueryMemory(&info, &pageInfo, (u64)hint);
-    if (info.type != MemType_Unmapped || info.size < sz)
+    const s64 remaining_size = (info.addr + info.size) - (u64)hint;
+    if (info.type != MemType_Unmapped || remaining_size < (s64)sz)
       goto _err;
   }
 
@@ -192,9 +188,6 @@ _err:
 
 void lj_switch_vfree(void *p, size_t sz)
 {
-  sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
-  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
-
   void *orig_p = get_orig(p);
   svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)p, (u64)orig_p, sz);
   free(orig_p);
@@ -202,9 +195,6 @@ void lj_switch_vfree(void *p, size_t sz)
 
 int lj_switch_vsetprot(void *p, size_t sz, unsigned long long prot)
 {
-  sz += LJ_MCBOTTOM_OFFSET; // add space for orig pointer
-  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1); // ensure it's aligned to page
-
   void *orig_p = get_orig(p);
   Result res = 0;
   Handle self = envGetOwnProcessHandle();
