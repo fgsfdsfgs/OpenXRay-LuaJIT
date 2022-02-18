@@ -1,5 +1,6 @@
 *.[oa]
 *.so
+*.so.2
 *.obj
 *.lib
 *.exp
