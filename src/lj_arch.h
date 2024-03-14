@@ -323,7 +323,11 @@
 #error "No support for PPC64"
 #endif
 
-#if _ARCH_PWR7
+#if _ARCH_PWR9
+#define LJ_ARCH_VERSION		90
+#elif _ARCH_PWR8
+#define LJ_ARCH_VERSION		80
+#elif _ARCH_PWR7
 #define LJ_ARCH_VERSION		70
 #elif _ARCH_PWR6
 #define LJ_ARCH_VERSION		60
@@ -336,6 +340,7 @@
 #else
 #define LJ_ARCH_VERSION		0
 #endif
+
 #if _ARCH_PPCSQ
 #define LJ_ARCH_SQRT		1
 #endif
@@ -487,6 +492,9 @@
 #elif LJ_TARGET_PPC
 #if defined(_LITTLE_ENDIAN) && (!defined(_BYTE_ORDER) || (_BYTE_ORDER == _LITTLE_ENDIAN))
 #error "No support for little-endian PPC32"
+#endif
+#if LJ_ARCH_PPC64 && LJ_ARCH_ENDIAN == LUAJIT_BE
+#error "No support for big-endian PPC64"
 #endif
 #if defined(__NO_FPRS__) && !defined(_SOFT_FLOAT)
 #error "No support for PPC/e500 anymore (use LuaJIT 2.0)"
